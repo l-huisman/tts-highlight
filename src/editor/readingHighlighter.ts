@@ -10,6 +10,9 @@ declare interface CSSWithHighlights {
 	highlights: HighlightRegistry;
 }
 
+/** Max chars to backtrack when a sequential word search misses */
+const SEARCH_BACKTRACK_CHARS = 20;
+
 interface TextNodeEntry {
 	node: Text;
 	/** Cumulative character offset where this node starts in the full text */
@@ -84,7 +87,7 @@ export class ReadingHighlighter {
 		// (handles minor whitespace differences between TTS text and DOM text)
 		if (idx === -1) {
 			// Try searching from a bit before current position (backtrack up to 20 chars)
-			const backtrack = Math.max(0, this.searchOffset - 20);
+			const backtrack = Math.max(0, this.searchOffset - SEARCH_BACKTRACK_CHARS);
 			idx = this.fullText.indexOf(word, backtrack);
 		}
 
@@ -108,8 +111,8 @@ export class ReadingHighlighter {
 		if (this.useCustomHighlight) {
 			try {
 				(CSS as unknown as CSSWithHighlights).highlights.delete("tts-current-word");
-			} catch {
-				// ignore
+			} catch (e) {
+				console.debug("TTS Highlight: could not clear CSS custom highlight", e);
 			}
 			this.highlight = null;
 		}
@@ -183,7 +186,8 @@ export class ReadingHighlighter {
 			range.setStart(startNode, startOffset);
 			range.setEnd(endNode, endOffset);
 			return range;
-		} catch {
+		} catch (e) {
+			console.debug("TTS Highlight: could not create DOM range", e);
 			return null;
 		}
 	}
@@ -193,7 +197,8 @@ export class ReadingHighlighter {
 			const HL = (globalThis as Record<string, unknown>).Highlight as typeof HighlightClass;
 			this.highlight = new HL(range);
 			(CSS as unknown as CSSWithHighlights).highlights.set("tts-current-word", this.highlight);
-		} catch {
+		} catch (e) {
+			console.debug("TTS Highlight: CSS custom highlight failed, falling back to mark", e);
 			this.applyHighlightMark(range);
 		}
 	}
@@ -204,9 +209,10 @@ export class ReadingHighlighter {
 			mark.className = "tts-word-current";
 			range.surroundContents(mark);
 			this.activeMarks.push(mark);
-		} catch {
+		} catch (e) {
 			// surroundContents can fail if range spans element boundaries —
 			// fall back to highlighting just the start node's portion
+			console.debug("TTS Highlight: surroundContents failed, using splitText fallback", e);
 			try {
 				const startContainer = range.startContainer;
 				if (startContainer.nodeType === Node.TEXT_NODE) {
@@ -219,8 +225,8 @@ export class ReadingHighlighter {
 					mark.appendChild(word);
 					this.activeMarks.push(mark);
 				}
-			} catch {
-				// give up
+			} catch (e2) {
+				console.debug("TTS Highlight: splitText fallback also failed", e2);
 			}
 		}
 	}
