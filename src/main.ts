@@ -55,6 +55,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "read-aloud",
 			name: "Read aloud",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "l" }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.readAloud(view, "full");
 			},
@@ -63,6 +64,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "read-from-cursor",
 			name: "Read from cursor",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "." }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.readAloud(view, "cursor");
 			},
@@ -71,6 +73,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "read-selection-aloud",
 			name: "Read selection aloud",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "'" }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.readAloud(view, "selection");
 			},
@@ -79,6 +82,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "pause-resume",
 			name: "Pause / Resume",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "," }],
 			callback: () => {
 				if (this.controller.getState() === "idle") {
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -92,6 +96,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "stop",
 			name: "Stop",
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "/" }],
 			callback: () => {
 				this.controller.stop();
 			},
