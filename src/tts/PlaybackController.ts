@@ -5,6 +5,9 @@ import { TextPreparer } from "./TextPreparer";
 import { setTTSHighlight } from "../editor/highlightExtension";
 import { ReadingHighlighter } from "../editor/readingHighlighter";
 
+/** Pixel margin for scroll-into-view edge detection */
+const SCROLL_MARGIN_PX = 50;
+
 export type HighlightCallback = (range: EditorRange) => void;
 export type StateChangeCallback = (state: PlaybackState, chunkIndex: number, totalChunks: number) => void;
 export type EndCallback = () => void;
@@ -219,14 +222,14 @@ export class PlaybackController {
 					if (widgetMark instanceof HTMLElement) {
 						const rect = widgetMark.getBoundingClientRect();
 						const viewRect = this.editorView.dom.getBoundingClientRect();
-						if (rect.top < viewRect.top + 50 || rect.bottom > viewRect.bottom - 50) {
+						if (rect.top < viewRect.top + SCROLL_MARGIN_PX || rect.bottom > viewRect.bottom - SCROLL_MARGIN_PX) {
 							widgetMark.scrollIntoView({ block: "center", behavior: "smooth" });
 						}
 					} else {
 						const coords = this.editorView.coordsAtPos(editorRange.from);
 						if (coords) {
 							const viewRect = this.editorView.dom.getBoundingClientRect();
-							if (coords.top < viewRect.top + 50 || coords.bottom > viewRect.bottom - 50) {
+							if (coords.top < viewRect.top + SCROLL_MARGIN_PX || coords.bottom > viewRect.bottom - SCROLL_MARGIN_PX) {
 								this.editorView.dispatch({
 									effects: EditorView.scrollIntoView(editorRange.from, { y: "center" }),
 								});
@@ -234,8 +237,8 @@ export class PlaybackController {
 						}
 					}
 				}
-			} catch {
-				// Editor may have been destroyed
+			} catch (e) {
+				console.debug("TTS Highlight: could not dispatch highlight, editor may be destroyed", e);
 			}
 		}
 
@@ -278,7 +281,7 @@ export class PlaybackController {
 		if (mark instanceof HTMLElement) {
 			const rect = mark.getBoundingClientRect();
 			const containerRect = container.getBoundingClientRect();
-			if (rect.top < containerRect.top + 50 || rect.bottom > containerRect.bottom - 50) {
+			if (rect.top < containerRect.top + SCROLL_MARGIN_PX || rect.bottom > containerRect.bottom - SCROLL_MARGIN_PX) {
 				mark.scrollIntoView({ block: "center", behavior: "smooth" });
 			}
 		}
@@ -298,8 +301,8 @@ export class PlaybackController {
 				this.editorView.dispatch({
 					effects: setTTSHighlight.of(null),
 				});
-			} catch {
-				// Editor may have been destroyed
+			} catch (e) {
+				console.debug("TTS Highlight: could not clear highlight, editor may be destroyed", e);
 			}
 		}
 	}

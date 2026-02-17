@@ -1,5 +1,22 @@
 import type { PositionMapEntry, PreparedText } from "../types";
 
+/** Minimum fraction of chunk used before accepting a sentence-boundary split */
+const MIN_SENTENCE_SPLIT_RATIO = 0.5;
+/** Minimum fraction of chunk used before accepting a word-boundary split */
+const MIN_WORD_SPLIT_RATIO = 0.3;
+
+/** Mutable parsing context threaded through helper methods */
+interface StripContext {
+	raw: string;
+	len: number;
+	editorOffset: number;
+	out: string[];
+	map: PositionMapEntry[];
+	i: number;
+	plainIndex: number;
+	lineStart: boolean;
+}
+
 /**
  * Single-pass state-machine parser that strips markdown formatting while
  * building a bidirectional character-position map between the plain text
@@ -45,13 +62,11 @@ export class TextPreparer {
 	): number | null {
 		if (map.length === 0) return null;
 
-		// Binary search for the largest entry with .plain <= plainIndex
 		let lo = 0;
 		let hi = map.length - 1;
 
 		if (plainIndex < map[0].plain) return map[0].editor;
 		if (plainIndex >= map[hi].plain) {
-			// Extrapolate from last entry
 			const last = map[hi];
 			return last.editor + (plainIndex - last.plain);
 		}
@@ -69,323 +84,404 @@ export class TextPreparer {
 		return entry.editor + (plainIndex - entry.plain);
 	}
 
+	// ── Main strip loop ────────────────────────────────────────────────
+
 	private stripMarkdown(
 		raw: string,
 		editorOffset: number
 	): { plainText: string; map: PositionMapEntry[] } {
-		const out: string[] = [];
-		const map: PositionMapEntry[] = [];
-		let plainIndex = 0;
-		let i = 0;
-		const len = raw.length;
+		const ctx: StripContext = {
+			raw,
+			len: raw.length,
+			editorOffset,
+			out: [],
+			map: [],
+			i: 0,
+			plainIndex: 0,
+			lineStart: true,
+		};
 
-		// Track state
-		let lineStart = true;
-		let inFrontmatter = false;
-		let frontmatterDone = false;
-
-		// Check for frontmatter at start
+		// Skip frontmatter opening
 		if (raw.startsWith("---\n") || raw.startsWith("---\r\n")) {
-			inFrontmatter = true;
 			const lineEnd = raw.indexOf("\n");
-			i = lineEnd + 1;
+			ctx.i = lineEnd + 1;
+			// Skip until closing ---
+			this.skipFrontmatter(ctx);
 		}
 
-		while (i < len) {
-			// Frontmatter: skip until closing ---
-			if (inFrontmatter) {
-				const nlIdx = raw.indexOf("\n", i);
-				if (nlIdx === -1) {
-					// No closing frontmatter — skip rest
-					break;
-				}
-				const line = raw.substring(i, nlIdx).replace(/\r$/, "");
-				i = nlIdx + 1;
-				if (line === "---") {
-					inFrontmatter = false;
-					frontmatterDone = true;
-					lineStart = true;
-				}
-				continue;
-			}
+		while (ctx.i < ctx.len) {
+			const ch = ctx.raw[ctx.i];
 
-			const ch = raw[i];
-
-			// Start of line processing
-			if (lineStart) {
-				lineStart = false;
-
-				// Table separator row: | --- | --- | or |:---:|
-				if (ch === "|") {
-					const nlIdx = raw.indexOf("\n", i);
-					const lineEnd = nlIdx === -1 ? len : nlIdx;
-					const line = raw.substring(i, lineEnd).trim();
-					if (/^\|[\s:|-]+\|$/.test(line) && line.includes("-")) {
-						// Skip the entire separator row
-						i = nlIdx === -1 ? len : nlIdx + 1;
-						lineStart = true;
-						continue;
-					}
-				}
-
-				// Fenced code block: ``` or ~~~
-				if (
-					(ch === "`" && raw[i + 1] === "`" && raw[i + 2] === "`") ||
-					(ch === "~" && raw[i + 1] === "~" && raw[i + 2] === "~")
-				) {
-					const fence = ch;
-					// Skip opening fence line
-					const nlIdx = raw.indexOf("\n", i);
-					if (nlIdx === -1) break;
-					i = nlIdx + 1;
-					// Skip until closing fence
-					while (i < len) {
-						const fenceNl = raw.indexOf("\n", i);
-						const fenceEnd = fenceNl === -1 ? len : fenceNl;
-						const fenceLine = raw.substring(i, fenceEnd).trimStart();
-						i = fenceNl === -1 ? len : fenceNl + 1;
-						if (
-							fenceLine.startsWith(fence + fence + fence) ||
-							(fenceLine.length >= 3 &&
-								fenceLine[0] === fence &&
-								fenceLine[1] === fence &&
-								fenceLine[2] === fence)
-						) {
-							break;
-						}
-					}
-					lineStart = true;
-					continue;
-				}
-
-				// Heading prefix: # ## ### etc.
-				if (ch === "#") {
-					let hi = i;
-					while (hi < len && raw[hi] === "#") hi++;
-					if (hi < len && raw[hi] === " ") {
-						i = hi + 1; // skip "# "
-						continue;
-					}
-				}
-
-				// Block quote prefix: >
-				if (ch === ">") {
-					i++;
-					if (i < len && raw[i] === " ") i++;
-					continue;
-				}
-
-				// Unordered list prefix: - , * , +
-				if (
-					(ch === "-" || ch === "*" || ch === "+") &&
-					i + 1 < len &&
-					raw[i + 1] === " "
-				) {
-					i += 2;
-					continue;
-				}
-
-				// Ordered list prefix: 1. 2. etc.
-				if (ch >= "0" && ch <= "9") {
-					let ni = i;
-					while (ni < len && raw[ni] >= "0" && raw[ni] <= "9") ni++;
-					if (ni < len && raw[ni] === "." && ni + 1 < len && raw[ni + 1] === " ") {
-						i = ni + 2;
-						continue;
-					}
-				}
-
-				// Horizontal rule: --- or *** or ___
-				if (
-					(ch === "-" || ch === "*" || ch === "_") &&
-					i + 2 < len &&
-					raw[i + 1] === ch &&
-					raw[i + 2] === ch
-				) {
-					const nlIdx = raw.indexOf("\n", i);
-					const lineEnd = nlIdx === -1 ? len : nlIdx;
-					const hrLine = raw.substring(i, lineEnd).trim();
-					if (/^[-*_]{3,}$/.test(hrLine)) {
-						i = nlIdx === -1 ? len : nlIdx + 1;
-						lineStart = true;
-						continue;
-					}
-				}
+			// Line-start block-level syntax
+			if (ctx.lineStart) {
+				ctx.lineStart = false;
+				if (this.tryLineStart(ctx, ch)) continue;
 			}
 
 			// Newlines
 			if (ch === "\n") {
-				this.pushChar(out, map, " ", plainIndex, i + editorOffset);
-				plainIndex++;
-				i++;
-				lineStart = true;
+				this.pushChar(ctx, " ");
+				ctx.i++;
+				ctx.lineStart = true;
 				continue;
 			}
 			if (ch === "\r") {
-				i++;
+				ctx.i++;
 				continue;
 			}
 
-			// Inline code: `...`
-			if (ch === "`") {
-				const end = raw.indexOf("`", i + 1);
-				if (end !== -1) {
-					// Keep the code content but strip backticks
-					i++;
-					while (i < end) {
-						this.pushChar(out, map, raw[i], plainIndex, i + editorOffset);
-						plainIndex++;
-						i++;
-					}
-					i++; // skip closing `
-					continue;
-				}
-			}
-
-			// Image: ![alt](url) — skip entirely (keep alt text)
-			if (ch === "!" && i + 1 < len && raw[i + 1] === "[") {
-				const closeBracket = raw.indexOf("]", i + 2);
-				if (closeBracket !== -1 && raw[closeBracket + 1] === "(") {
-					const closeParen = raw.indexOf(")", closeBracket + 2);
-					if (closeParen !== -1) {
-						// Output alt text
-						const altStart = i + 2;
-						for (let ai = altStart; ai < closeBracket; ai++) {
-							this.pushChar(out, map, raw[ai], plainIndex, ai + editorOffset);
-							plainIndex++;
-						}
-						i = closeParen + 1;
-						continue;
-					}
-				}
-			}
-
-			// Link: [text](url) — keep text, strip url
-			if (ch === "[") {
-				const closeBracket = this.findClosingBracket(raw, i);
-				if (closeBracket !== -1 && closeBracket + 1 < len && raw[closeBracket + 1] === "(") {
-					const closeParen = raw.indexOf(")", closeBracket + 2);
-					if (closeParen !== -1) {
-						// Output link text
-						i++;
-						while (i < closeBracket) {
-							this.pushChar(out, map, raw[i], plainIndex, i + editorOffset);
-							plainIndex++;
-							i++;
-						}
-						i = closeParen + 1;
-						continue;
-					}
-				}
-			}
-
-			// Wikilink: [[target|display]] or [[target]]
-			if (ch === "[" && i + 1 < len && raw[i + 1] === "[") {
-				const closeWiki = raw.indexOf("]]", i + 2);
-				if (closeWiki !== -1) {
-					const inner = raw.substring(i + 2, closeWiki);
-					const pipeIdx = inner.indexOf("|");
-					const display = pipeIdx !== -1 ? inner.substring(pipeIdx + 1) : inner;
-					// Map display text — offset within the inner content
-					const displayStart = pipeIdx !== -1 ? i + 2 + pipeIdx + 1 : i + 2;
-					for (let di = 0; di < display.length; di++) {
-						this.pushChar(
-							out,
-							map,
-							display[di],
-							plainIndex,
-							displayStart + di + editorOffset
-						);
-						plainIndex++;
-					}
-					i = closeWiki + 2;
-					continue;
-				}
-			}
-
-			// Bold/italic markers: **, *, ~~
-			if (ch === "*" || ch === "_") {
-				// Count consecutive markers
-				let count = 0;
-				const marker = ch;
-				let mi = i;
-				while (mi < len && raw[mi] === marker) {
-					count++;
-					mi++;
-				}
-				if (count <= 3) {
-					i = mi; // skip the marker characters
-					continue;
-				}
-			}
-
-			if (ch === "~" && i + 1 < len && raw[i + 1] === "~") {
-				i += 2; // skip ~~
-				continue;
-			}
-
-			if (ch === "=" && i + 1 < len && raw[i + 1] === "=") {
-				i += 2; // skip == (highlight)
-				continue;
-			}
-
-			// Table pipe delimiters: strip | and add space between cells
-			if (ch === "|") {
-				// Emit a space to separate cell contents (avoid merging words)
-				const lastChar = out.length > 0 ? out[out.length - 1] : "";
-				if (lastChar !== " " && lastChar !== "") {
-					this.pushChar(out, map, " ", plainIndex, i + editorOffset);
-					plainIndex++;
-				}
-				i++;
-				// Skip any whitespace after the pipe
-				while (i < len && raw[i] === " ") i++;
-				continue;
-			}
-
-			// HTML tags: <...>
-			if (ch === "<") {
-				const closeAngle = raw.indexOf(">", i + 1);
-				if (closeAngle !== -1) {
-					const tagContent = raw.substring(i + 1, closeAngle);
-					// Simple check for HTML tag
-					if (/^\/?[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?\/?$/.test(tagContent)) {
-						i = closeAngle + 1;
-						continue;
-					}
-				}
-			}
+			// Inline syntax
+			if (this.tryInline(ctx, ch)) continue;
 
 			// Regular character — keep it
-			this.pushChar(out, map, ch, plainIndex, i + editorOffset);
-			plainIndex++;
-			i++;
+			this.pushChar(ctx, ch);
+			ctx.i++;
 		}
 
-		// Collapse multiple spaces
-		let plainText = out.join("");
-		// Trim leading/trailing whitespace
-		plainText = plainText.trim();
-
-		return { plainText, map };
+		let plainText = ctx.out.join("").trim();
+		return { plainText, map: ctx.map };
 	}
 
-	private pushChar(
-		out: string[],
-		map: PositionMapEntry[],
-		ch: string,
-		plainIndex: number,
-		editorIndex: number
-	): void {
-		out.push(ch);
-		// Only add map entries at transition points (when the delta changes)
-		if (
-			map.length === 0 ||
-			editorIndex - map[map.length - 1].editor !==
-				plainIndex - map[map.length - 1].plain
-		) {
-			map.push({ plain: plainIndex, editor: editorIndex });
+	// ── Frontmatter ────────────────────────────────────────────────────
+
+	private skipFrontmatter(ctx: StripContext): void {
+		while (ctx.i < ctx.len) {
+			const nlIdx = ctx.raw.indexOf("\n", ctx.i);
+			if (nlIdx === -1) {
+				ctx.i = ctx.len;
+				return;
+			}
+			const line = ctx.raw.substring(ctx.i, nlIdx).replace(/\r$/, "");
+			ctx.i = nlIdx + 1;
+			if (line === "---") {
+				ctx.lineStart = true;
+				return;
+			}
 		}
+	}
+
+	// ── Line-start block elements ──────────────────────────────────────
+
+	/**
+	 * Try to consume a block-level prefix at the start of a line.
+	 * Returns true if something was consumed and the main loop should continue.
+	 */
+	private tryLineStart(ctx: StripContext, ch: string): boolean {
+		return (
+			this.tryTableSeparator(ctx, ch) ||
+			this.tryCodeFence(ctx, ch) ||
+			this.tryHeading(ctx, ch) ||
+			this.tryBlockquote(ctx, ch) ||
+			this.tryUnorderedList(ctx, ch) ||
+			this.tryOrderedList(ctx, ch) ||
+			this.tryHorizontalRule(ctx, ch)
+		);
+	}
+
+	/** Skip table separator rows like | --- | --- | */
+	private tryTableSeparator(ctx: StripContext, ch: string): boolean {
+		if (ch !== "|") return false;
+
+		const nlIdx = ctx.raw.indexOf("\n", ctx.i);
+		const lineEnd = nlIdx === -1 ? ctx.len : nlIdx;
+		const line = ctx.raw.substring(ctx.i, lineEnd).trim();
+
+		if (/^\|[\s:|-]+\|$/.test(line) && line.includes("-")) {
+			ctx.i = nlIdx === -1 ? ctx.len : nlIdx + 1;
+			ctx.lineStart = true;
+			return true;
+		}
+		return false;
+	}
+
+	/** Skip fenced code blocks (``` or ~~~) */
+	private tryCodeFence(ctx: StripContext, ch: string): boolean {
+		const { raw, len } = ctx;
+		if (
+			!(ch === "`" && raw[ctx.i + 1] === "`" && raw[ctx.i + 2] === "`") &&
+			!(ch === "~" && raw[ctx.i + 1] === "~" && raw[ctx.i + 2] === "~")
+		) {
+			return false;
+		}
+
+		const fence = ch;
+		// Skip opening fence line
+		const nlIdx = raw.indexOf("\n", ctx.i);
+		if (nlIdx === -1) {
+			ctx.i = len;
+			return true;
+		}
+		ctx.i = nlIdx + 1;
+
+		// Skip until closing fence
+		while (ctx.i < len) {
+			const fenceNl = raw.indexOf("\n", ctx.i);
+			const fenceEnd = fenceNl === -1 ? len : fenceNl;
+			const fenceLine = raw.substring(ctx.i, fenceEnd).trimStart();
+			ctx.i = fenceNl === -1 ? len : fenceNl + 1;
+			if (
+				fenceLine.length >= 3 &&
+				fenceLine[0] === fence &&
+				fenceLine[1] === fence &&
+				fenceLine[2] === fence
+			) {
+				break;
+			}
+		}
+		ctx.lineStart = true;
+		return true;
+	}
+
+	/** Strip heading prefix (# ## ### etc.) */
+	private tryHeading(ctx: StripContext, ch: string): boolean {
+		if (ch !== "#") return false;
+
+		let hi = ctx.i;
+		while (hi < ctx.len && ctx.raw[hi] === "#") hi++;
+		if (hi < ctx.len && ctx.raw[hi] === " ") {
+			ctx.i = hi + 1;
+			return true;
+		}
+		return false;
+	}
+
+	/** Strip blockquote prefix (>) */
+	private tryBlockquote(ctx: StripContext, ch: string): boolean {
+		if (ch !== ">") return false;
+		ctx.i++;
+		if (ctx.i < ctx.len && ctx.raw[ctx.i] === " ") ctx.i++;
+		return true;
+	}
+
+	/** Strip unordered list prefix (- , * , +) */
+	private tryUnorderedList(ctx: StripContext, ch: string): boolean {
+		if (
+			(ch === "-" || ch === "*" || ch === "+") &&
+			ctx.i + 1 < ctx.len &&
+			ctx.raw[ctx.i + 1] === " "
+		) {
+			ctx.i += 2;
+			return true;
+		}
+		return false;
+	}
+
+	/** Strip ordered list prefix (1. 2. etc.) */
+	private tryOrderedList(ctx: StripContext, ch: string): boolean {
+		if (ch < "0" || ch > "9") return false;
+
+		let ni = ctx.i;
+		while (ni < ctx.len && ctx.raw[ni] >= "0" && ctx.raw[ni] <= "9") ni++;
+		if (ni < ctx.len && ctx.raw[ni] === "." && ni + 1 < ctx.len && ctx.raw[ni + 1] === " ") {
+			ctx.i = ni + 2;
+			return true;
+		}
+		return false;
+	}
+
+	/** Skip horizontal rules (---, ***, ___) */
+	private tryHorizontalRule(ctx: StripContext, ch: string): boolean {
+		if (
+			!(ch === "-" || ch === "*" || ch === "_") ||
+			ctx.i + 2 >= ctx.len ||
+			ctx.raw[ctx.i + 1] !== ch ||
+			ctx.raw[ctx.i + 2] !== ch
+		) {
+			return false;
+		}
+
+		const nlIdx = ctx.raw.indexOf("\n", ctx.i);
+		const lineEnd = nlIdx === -1 ? ctx.len : nlIdx;
+		const hrLine = ctx.raw.substring(ctx.i, lineEnd).trim();
+
+		if (/^[-*_]{3,}$/.test(hrLine)) {
+			ctx.i = nlIdx === -1 ? ctx.len : nlIdx + 1;
+			ctx.lineStart = true;
+			return true;
+		}
+		return false;
+	}
+
+	// ── Inline syntax ──────────────────────────────────────────────────
+
+	/**
+	 * Try to consume inline markdown syntax at the current position.
+	 * Returns true if something was consumed and the main loop should continue.
+	 */
+	private tryInline(ctx: StripContext, ch: string): boolean {
+		return (
+			this.tryInlineCode(ctx, ch) ||
+			this.tryImage(ctx, ch) ||
+			this.tryWikilink(ctx, ch) ||
+			this.tryLink(ctx, ch) ||
+			this.tryBoldItalic(ctx, ch) ||
+			this.tryStrikethrough(ctx, ch) ||
+			this.tryHighlightMarker(ctx, ch) ||
+			this.tryTablePipe(ctx, ch) ||
+			this.tryHtmlTag(ctx, ch)
+		);
+	}
+
+	/** Strip backticks, keep code content */
+	private tryInlineCode(ctx: StripContext, ch: string): boolean {
+		if (ch !== "`") return false;
+
+		const end = ctx.raw.indexOf("`", ctx.i + 1);
+		if (end === -1) return false;
+
+		ctx.i++;
+		while (ctx.i < end) {
+			this.pushChar(ctx, ctx.raw[ctx.i]);
+			ctx.i++;
+		}
+		ctx.i++; // skip closing `
+		return true;
+	}
+
+	/** Handle ![alt](url) — keep alt text, strip URL */
+	private tryImage(ctx: StripContext, ch: string): boolean {
+		if (ch !== "!" || ctx.i + 1 >= ctx.len || ctx.raw[ctx.i + 1] !== "[") return false;
+
+		const closeBracket = ctx.raw.indexOf("]", ctx.i + 2);
+		if (closeBracket === -1 || ctx.raw[closeBracket + 1] !== "(") return false;
+
+		const closeParen = ctx.raw.indexOf(")", closeBracket + 2);
+		if (closeParen === -1) return false;
+
+		const altStart = ctx.i + 2;
+		for (let ai = altStart; ai < closeBracket; ai++) {
+			this.pushCharAt(ctx, ctx.raw[ai], ai);
+		}
+		ctx.i = closeParen + 1;
+		return true;
+	}
+
+	/** Handle [[target|display]] or [[target]] — keep display text */
+	private tryWikilink(ctx: StripContext, ch: string): boolean {
+		if (ch !== "[" || ctx.i + 1 >= ctx.len || ctx.raw[ctx.i + 1] !== "[") return false;
+
+		const closeWiki = ctx.raw.indexOf("]]", ctx.i + 2);
+		if (closeWiki === -1) return false;
+
+		const inner = ctx.raw.substring(ctx.i + 2, closeWiki);
+		const pipeIdx = inner.indexOf("|");
+		const display = pipeIdx !== -1 ? inner.substring(pipeIdx + 1) : inner;
+		const displayStart = pipeIdx !== -1 ? ctx.i + 2 + pipeIdx + 1 : ctx.i + 2;
+
+		for (let di = 0; di < display.length; di++) {
+			this.pushCharAt(ctx, display[di], displayStart + di);
+		}
+		ctx.i = closeWiki + 2;
+		return true;
+	}
+
+	/** Handle [text](url) — keep link text, strip URL */
+	private tryLink(ctx: StripContext, ch: string): boolean {
+		if (ch !== "[") return false;
+
+		const closeBracket = this.findClosingBracket(ctx.raw, ctx.i);
+		if (closeBracket === -1 || closeBracket + 1 >= ctx.len || ctx.raw[closeBracket + 1] !== "(") {
+			return false;
+		}
+
+		const closeParen = ctx.raw.indexOf(")", closeBracket + 2);
+		if (closeParen === -1) return false;
+
+		ctx.i++;
+		while (ctx.i < closeBracket) {
+			this.pushChar(ctx, ctx.raw[ctx.i]);
+			ctx.i++;
+		}
+		ctx.i = closeParen + 1;
+		return true;
+	}
+
+	/** Skip bold/italic markers (*, _) up to 3 characters */
+	private tryBoldItalic(ctx: StripContext, ch: string): boolean {
+		if (ch !== "*" && ch !== "_") return false;
+
+		let count = 0;
+		let mi = ctx.i;
+		while (mi < ctx.len && ctx.raw[mi] === ch) {
+			count++;
+			mi++;
+		}
+		if (count <= 3) {
+			ctx.i = mi;
+			return true;
+		}
+		return false;
+	}
+
+	/** Skip ~~ strikethrough markers */
+	private tryStrikethrough(ctx: StripContext, ch: string): boolean {
+		if (ch !== "~" || ctx.i + 1 >= ctx.len || ctx.raw[ctx.i + 1] !== "~") return false;
+		ctx.i += 2;
+		return true;
+	}
+
+	/** Skip == highlight markers */
+	private tryHighlightMarker(ctx: StripContext, ch: string): boolean {
+		if (ch !== "=" || ctx.i + 1 >= ctx.len || ctx.raw[ctx.i + 1] !== "=") return false;
+		ctx.i += 2;
+		return true;
+	}
+
+	/** Strip table pipe delimiters, add space between cells */
+	private tryTablePipe(ctx: StripContext, ch: string): boolean {
+		if (ch !== "|") return false;
+
+		const lastChar = ctx.out.length > 0 ? ctx.out[ctx.out.length - 1] : "";
+		if (lastChar !== " " && lastChar !== "") {
+			this.pushChar(ctx, " ");
+		}
+		ctx.i++;
+		// Skip whitespace after the pipe
+		while (ctx.i < ctx.len && ctx.raw[ctx.i] === " ") ctx.i++;
+		return true;
+	}
+
+	/** Skip HTML tags like <div>, </span>, <br/> */
+	private tryHtmlTag(ctx: StripContext, ch: string): boolean {
+		if (ch !== "<") return false;
+
+		const closeAngle = ctx.raw.indexOf(">", ctx.i + 1);
+		if (closeAngle === -1) return false;
+
+		const tagContent = ctx.raw.substring(ctx.i + 1, closeAngle);
+		if (/^\/?[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?\/?$/.test(tagContent)) {
+			ctx.i = closeAngle + 1;
+			return true;
+		}
+		return false;
+	}
+
+	// ── Helpers ─────────────────────────────────────────────────────────
+
+	/** Push a character at the current position and advance plainIndex */
+	private pushChar(ctx: StripContext, ch: string): void {
+		ctx.out.push(ch);
+		if (
+			ctx.map.length === 0 ||
+			(ctx.i + ctx.editorOffset) - ctx.map[ctx.map.length - 1].editor !==
+				ctx.plainIndex - ctx.map[ctx.map.length - 1].plain
+		) {
+			ctx.map.push({ plain: ctx.plainIndex, editor: ctx.i + ctx.editorOffset });
+		}
+		ctx.plainIndex++;
+	}
+
+	/** Push a character with an explicit editor position (for content extracted out-of-order) */
+	private pushCharAt(ctx: StripContext, ch: string, editorIndex: number): void {
+		ctx.out.push(ch);
+		if (
+			ctx.map.length === 0 ||
+			(editorIndex + ctx.editorOffset) - ctx.map[ctx.map.length - 1].editor !==
+				ctx.plainIndex - ctx.map[ctx.map.length - 1].plain
+		) {
+			ctx.map.push({ plain: ctx.plainIndex, editor: editorIndex + ctx.editorOffset });
+		}
+		ctx.plainIndex++;
 	}
 
 	private findClosingBracket(text: string, openPos: number): number {
@@ -400,10 +496,11 @@ export class TextPreparer {
 		return -1;
 	}
 
+	// ── Chunking ────────────────────────────────────────────────────────
+
 	/**
-	 * Split plain text into chunks at paragraph boundaries (double newline
-	 * in original, which becomes double space after stripping).
-	 * Falls back to sentence boundaries, then hard split.
+	 * Split plain text into chunks at sentence boundaries.
+	 * Falls back to word boundaries, then hard split.
 	 */
 	private splitChunks(
 		text: string,
@@ -430,14 +527,14 @@ export class TextPreparer {
 
 			// Try to split at a period followed by space (sentence boundary)
 			const lastSentence = searchRegion.lastIndexOf(". ");
-			if (lastSentence > maxSize * 0.5) {
+			if (lastSentence > maxSize * MIN_SENTENCE_SPLIT_RATIO) {
 				splitAt = offset + lastSentence + 2;
 			}
 
 			// Fall back to last space
 			if (splitAt === -1) {
 				const lastSpace = searchRegion.lastIndexOf(" ");
-				if (lastSpace > maxSize * 0.3) {
+				if (lastSpace > maxSize * MIN_WORD_SPLIT_RATIO) {
 					splitAt = offset + lastSpace + 1;
 				}
 			}

@@ -1,5 +1,8 @@
 import type { TTSSettings } from "../types";
 
+/** Timeout for waiting for voices to load via onvoiceschanged event */
+const VOICE_LOAD_TIMEOUT_MS = 3000;
+
 export type BoundaryCallback = (charIndex: number, charLength: number) => void;
 export type EndCallback = () => void;
 export type ErrorCallback = (error: string) => void;
@@ -30,7 +33,7 @@ export class SpeechEngine {
 			setTimeout(() => {
 				window.speechSynthesis.removeEventListener("voiceschanged", handler);
 				resolve(window.speechSynthesis.getVoices());
-			}, 3000);
+			}, VOICE_LOAD_TIMEOUT_MS);
 		});
 	}
 
