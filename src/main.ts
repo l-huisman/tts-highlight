@@ -22,7 +22,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		await this.loadSettings();
 
 		// Load voices early
-		SpeechEngine.loadVoices();
+		void SpeechEngine.loadVoices();
 
 		// Register CM6 extension for source/live-preview highlighting
 		this.registerEditorExtension(ttsHighlightExtension);
@@ -55,7 +55,6 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "read-aloud",
 			name: "Read aloud",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "l" }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.readAloud(view, "full");
 			},
@@ -64,7 +63,6 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "read-from-cursor",
 			name: "Read from cursor",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "." }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.readAloud(view, "cursor");
 			},
@@ -73,7 +71,6 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "read-selection-aloud",
 			name: "Read selection aloud",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "'" }],
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.readAloud(view, "selection");
 			},
@@ -81,8 +78,7 @@ export default class TTSHighlightPlugin extends Plugin {
 
 		this.addCommand({
 			id: "pause-resume",
-			name: "Pause / Resume",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "," }],
+			name: "Pause / resume",
 			callback: () => {
 				if (this.controller.getState() === "idle") {
 					const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -96,14 +92,13 @@ export default class TTSHighlightPlugin extends Plugin {
 		this.addCommand({
 			id: "stop",
 			name: "Stop",
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "/" }],
 			callback: () => {
 				this.controller.stop();
 			},
 		});
 
 		// Ribbon icon
-		this.addRibbonIcon("audio-lines", "TTS Highlight", () => {
+		this.addRibbonIcon("audio-lines", "TTS highlight", () => {
 			if (this.controller.getState() !== "idle") {
 				this.controller.stop();
 			} else {
@@ -142,7 +137,7 @@ export default class TTSHighlightPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<TTSSettings>);
 	}
 
 	async saveSettings(): Promise<void> {
@@ -184,13 +179,13 @@ export default class TTSHighlightPlugin extends Plugin {
 
 		if (isReadingMode) {
 			// Reading mode: use the preview container
-			readingContainer = (view as MarkdownView).contentEl.querySelector(
+			readingContainer = view.contentEl.querySelector<HTMLElement>(
 				".markdown-preview-view .markdown-preview-sizer"
-			) as HTMLElement | null;
+			);
 			if (!readingContainer) {
-				readingContainer = (view as MarkdownView).contentEl.querySelector(
+				readingContainer = view.contentEl.querySelector<HTMLElement>(
 					".markdown-preview-view"
-				) as HTMLElement | null;
+				);
 			}
 		} else {
 			// Source/live-preview mode: get the CM6 EditorView
@@ -202,8 +197,7 @@ export default class TTSHighlightPlugin extends Plugin {
 
 	private getEditorView(view: MarkdownView): EditorView | null {
 		// Access the CM6 EditorView from Obsidian's editor
-		// @ts-ignore - accessing internal Obsidian API
-		const cmEditor = view.editor?.cm;
+		const cmEditor = (view.editor as unknown as { cm?: EditorView })?.cm;
 		if (cmEditor instanceof EditorView) {
 			return cmEditor;
 		}
