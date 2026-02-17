@@ -19,10 +19,14 @@ mark.tts-word-current {
 
 /* Status bar controls */
 .tts-status-bar {
-	display: flex;
+	display: none;
 	align-items: center;
 	gap: 6px;
 	cursor: default;
+}
+
+.tts-status-bar.is-active {
+	display: flex;
 }
 
 .tts-status-bar .tts-btn {

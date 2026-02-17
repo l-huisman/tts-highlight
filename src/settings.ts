@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, Platform } from "obsidian";
 import type TTSHighlightPlugin from "./main";
 import type { TTSSettings } from "./types";
 
@@ -24,7 +24,7 @@ export class TTSSettingTab extends PluginSettingTab {
 			.setDesc("CSS color for the highlighted word. Leave empty to use the accent color.")
 			.addText((text) =>
 				text
-					.setPlaceholder("e.g. rgba(255, 200, 0, 0.35)")
+					.setPlaceholder("#ffd700")
 					.setValue(this.plugin.settings.highlightColor)
 					.onChange(async (value) => {
 						this.plugin.settings.highlightColor = value;
@@ -63,13 +63,13 @@ export class TTSSettingTab extends PluginSettingTab {
 	}
 
 	private addHotkeySection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: "Hotkeys" });
+		new Setting(containerEl).setName("Hotkeys").setHeading();
 
 		const commands = [
 			{ id: "tts-highlight:read-aloud", name: "Read aloud" },
 			{ id: "tts-highlight:read-from-cursor", name: "Read from cursor" },
 			{ id: "tts-highlight:read-selection-aloud", name: "Read selection aloud" },
-			{ id: "tts-highlight:pause-resume", name: "Pause / Resume" },
+			{ id: "tts-highlight:pause-resume", name: "Pause / resume" },
 			{ id: "tts-highlight:stop", name: "Stop" },
 		];
 
@@ -81,10 +81,9 @@ export class TTSSettingTab extends PluginSettingTab {
 				.addButton((btn) =>
 					btn.setButtonText("Configure").onClick(() => {
 						// Open Obsidian's hotkey settings filtered to this command
-						// @ts-ignore — accessing internal setting API
-						const tab = this.app.setting.openTabById("hotkeys");
-						if (tab) {
-							// @ts-ignore
+						const setting = (this.app as unknown as { setting?: { openTabById(id: string): { setQuery?(q: string): void } | undefined } }).setting;
+						const tab = setting?.openTabById("hotkeys");
+						if (tab?.setQuery) {
 							tab.setQuery("TTS Highlight");
 						}
 					})
@@ -93,8 +92,8 @@ export class TTSSettingTab extends PluginSettingTab {
 	}
 
 	private getHotkeyDisplay(commandId: string): string {
-		// @ts-ignore — accessing internal hotkey API
-		const manager = (this.app as any).hotkeyManager;
+		// Accessing internal hotkey API
+		const manager = (this.app as unknown as { hotkeyManager?: { getHotkeys(id: string): { modifiers: string[]; key: string }[] | undefined; getDefaultHotkeys(id: string): { modifiers: string[]; key: string }[] | undefined } }).hotkeyManager;
 		const customKeys: { modifiers: string[]; key: string }[] | undefined =
 			manager?.getHotkeys(commandId);
 		const defaultKeys: { modifiers: string[]; key: string }[] | undefined =
@@ -112,7 +111,7 @@ export class TTSSettingTab extends PluginSettingTab {
 	}
 
 	private formatModifier(mod: string): string {
-		const isMac = navigator.platform.includes("Mac");
+		const isMac = Platform.isMacOS;
 		switch (mod) {
 			case "Mod": return isMac ? "\u2318" : "Ctrl";
 			case "Shift": return isMac ? "\u21E7" : "Shift";

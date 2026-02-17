@@ -19,7 +19,6 @@ export class StatusBarControl {
 
 		this.el = plugin.addStatusBarItem();
 		this.el.addClass("tts-status-bar");
-		this.el.style.display = "none";
 
 		this.pauseBtn = this.el.createEl("span", { cls: "tts-btn" });
 		setIcon(this.pauseBtn, "pause");
@@ -36,11 +35,11 @@ export class StatusBarControl {
 
 	update(state: PlaybackState, chunkIndex: number, totalChunks: number): void {
 		if (state === "idle") {
-			this.el.style.display = "none";
+			this.el.removeClass("is-active");
 			return;
 		}
 
-		this.el.style.display = "flex";
+		this.el.addClass("is-active");
 		setIcon(this.pauseBtn, state === "paused" ? "play" : "pause");
 		this.pauseBtn.setAttribute("aria-label", state === "paused" ? "Resume" : "Pause");
 

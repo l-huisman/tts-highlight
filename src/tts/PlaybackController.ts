@@ -39,9 +39,9 @@ export class PlaybackController {
 		this.readingHighlighter = new ReadingHighlighter();
 		this.widgetHighlighter = new ReadingHighlighter();
 
-		this.engine.setBoundaryCallback(this.handleBoundary.bind(this));
-		this.engine.setEndCallback(this.handleChunkEnd.bind(this));
-		this.engine.setErrorCallback(this.handleError.bind(this));
+		this.engine.setBoundaryCallback((ci: number, cl: number) => this.handleBoundary(ci, cl));
+		this.engine.setEndCallback(() => this.handleChunkEnd());
+		this.engine.setErrorCallback((err: string) => this.handleError(err));
 	}
 
 	setStateChangeCallback(cb: StateChangeCallback): void {
@@ -271,7 +271,7 @@ export class PlaybackController {
 		// all text nodes, but since the CM6 decoration already covers regular
 		// text, we only call this when the word is NOT in regular text.
 		this.widgetHighlighter.highlightWord(
-			this.editorView.contentDOM as HTMLElement,
+			this.editorView.contentDOM,
 			word
 		);
 	}
