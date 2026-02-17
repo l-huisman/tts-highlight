@@ -2,7 +2,6 @@ import {
 	StateField,
 	StateEffect,
 	type Extension,
-	type Range,
 } from "@codemirror/state";
 import {
 	Decoration,

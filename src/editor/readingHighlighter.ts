@@ -218,7 +218,7 @@ export class ReadingHighlighter {
 				if (startContainer.nodeType === Node.TEXT_NODE) {
 					const textNode = startContainer as Text;
 					const word = textNode.splitText(range.startOffset);
-					const after = word.splitText(range.endOffset - range.startOffset);
+					word.splitText(range.endOffset - range.startOffset);
 					const mark = document.createElement("mark");
 					mark.className = "tts-word-current";
 					word.parentNode?.replaceChild(mark, word);
