@@ -46,7 +46,7 @@ export class TTSSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Chunk size")
 			.setDesc(
-				"Maximum characters per speech chunk. Lower values improve reliability on Chrome."
+				"Maximum characters per speech chunk. Lower values improve reliability."
 			)
 			.addSlider((slider) =>
 				slider

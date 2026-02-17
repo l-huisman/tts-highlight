@@ -98,7 +98,7 @@ export default class TTSHighlightPlugin extends Plugin {
 		});
 
 		// Ribbon icon
-		this.addRibbonIcon("audio-lines", "TTS highlight", () => {
+		this.addRibbonIcon("audio-lines", "TTS Highlight", () => {
 			if (this.controller.getState() !== "idle") {
 				this.controller.stop();
 			} else {
