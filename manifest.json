@@ -1,0 +1,10 @@
+{
+	"id": "tts-highlight",
+	"name": "TTS Highlight",
+	"version": "1.0.0",
+	"minAppVersion": "1.5.0",
+	"description": "Read notes aloud with real-time word-by-word highlighting using your system voices.",
+	"author": "lh",
+	"authorUrl": "https://github.com/l-huisman",
+	"isDesktopOnly": true
+}

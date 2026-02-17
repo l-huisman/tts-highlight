@@ -1,0 +1,48 @@
+/* TTS Highlight - Word highlighting */
+.tts-word-current {
+	background-color: var(--tts-highlight-color, hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.35));
+	border-radius: 2px;
+	transition: background-color 0.05s ease;
+}
+
+/* Reading mode highlight via CSS Custom Highlight API */
+::highlight(tts-current-word) {
+	background-color: var(--tts-highlight-color, hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.35));
+}
+
+/* Reading mode fallback using <mark> */
+mark.tts-word-current {
+	background-color: var(--tts-highlight-color, hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.35));
+	color: inherit;
+	border-radius: 2px;
+}
+
+/* Status bar controls */
+.tts-status-bar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	cursor: default;
+}
+
+.tts-status-bar .tts-btn {
+	cursor: pointer;
+	opacity: 0.7;
+	padding: 0 2px;
+	display: flex;
+	align-items: center;
+}
+
+.tts-status-bar .tts-btn svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tts-status-bar .tts-btn:hover {
+	opacity: 1;
+}
+
+.tts-status-bar .tts-progress {
+	font-size: 0.85em;
+	opacity: 0.7;
+}
